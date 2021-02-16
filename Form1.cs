@@ -20,100 +20,44 @@ namespace Vet
             InitializeComponent();
         }
 
+        ProcessEssentials process_essentials = new ProcessEssentials();
 
-
-        /*
-        private
-            void fill_process_data(Process process)
-        {
-            
-
-            string[] process_item_indexes = new string[2];
-            ListViewItem item;
-
-
-
-            
-            string p_name;
-            string pid;
-
-
-
-            using (process)
-            {
-                p_name = process.ProcessName + ".exe";
-                pid    = process.Id.ToString();
-            }
-
-
-            
-
-            process_item_indexes[0] = p_name;
-            process_item_indexes[1] = pid;
-
-            item = new ListViewItem(process_item_indexes);
-            
-            change_via_thread.ControlInvoke(processes_listview, () => processes_listview.BeginUpdate());        //  ~20% less memory usage
-            change_via_thread.ControlInvoke(processes_listview, () => processes_listview.Items.Add(item));
-            change_via_thread.ControlInvoke(processes_listview, () => processes_listview.EndUpdate());          //
-
-
-            
-        }
         
 
-
-
-        private
-            void start__fill_process_data()
-        {
-
-            change_via_thread.ControlInvoke(processes_listview, () =>
-                    processes_listview.Items.Clear()
-                    );
-
-            
-
-            Process[] processes = Process.GetProcesses();
-
-
-
-
-            change_via_thread.ControlInvoke(processes_listview, () =>
-                    processes_listview.VirtualListSize = processes.Length
-                    ); 
-
-            foreach (Process process in processes)
-            {
-                Thread p_thread = new Thread(() => fill_process_data(process));
-                p_thread.Start();
-            }
-        }
-        */
-
-        //---------------------------------------------------------------------------
-        private
-            void update_process_count_lbl()
+        
+       
+        public 
+            void remove_dead_pids()
         {
             while (true)
             {
-                Process[] count;
 
-                try
+                foreach (ListViewItem item in processes_listview.Items)
                 {
+                    bool found = Process.GetProcesses().Any(x => x.Id == Int32.Parse(item.Text));
 
-                    count = Process.GetProcesses();
+                    if (!found)
+                    {
 
-                    change_via_thread.ControlInvoke(label1, () =>
-                    label1.Text = count.Length.ToString()
-                    );   
-                    
+                        change_via_thread.ControlInvoke(processes_listview, () => item.Remove());
+
+                    }                   
                 }
-                catch (Exception)
-                {
-                    continue;
-                }
-                Thread.Sleep(444);
+
+                Thread.Sleep(1250);
+            }           
+        }
+
+       
+        public 
+            void update_vetted_processList()
+        {
+            while (true)
+            {
+
+                change_via_thread.ControlInvoke(null, () => toolstrip_processes_count.Text = processes_listview.Items.Count.ToString());
+                Thread.Sleep(250);
+
             }
         }
 
@@ -126,19 +70,21 @@ namespace Vet
 
             processes_listview.View = View.Details;
             processes_listview.ListViewItemSorter = null;
-            processes_listview.Columns.Add("Process", 70);
-            processes_listview.Columns.Add("PID", 50);
+            processes_listview.Columns.Add("ID", 90);
+            processes_listview.Columns.Add("NAME", 170);
 
 
+            Thread remove_old_pids = new Thread(remove_dead_pids);
+            remove_old_pids.Start();
 
-
+            Thread update_counter = new Thread(update_vetted_processList);
+            update_counter.Start();
 
             Thread add_new_spawned_process = new Thread(start_AddNewprocess);
             add_new_spawned_process.Start();
-            
 
-            Thread thread_updateProcessCounter_lbl = new Thread(update_process_count_lbl);
-            thread_updateProcessCounter_lbl.Start();
+            Thread remove_old_processes = new Thread(start_RemoveOldProcess);
+            remove_old_processes.Start();           
         }
 
 
@@ -156,11 +102,14 @@ namespace Vet
         void start_RemoveOldProcess()
         {            
             ManagementEventWatcher processStopEvent = new ManagementEventWatcher("SELECT * FROM Win32_ProcessStopTrace");
+
             processStopEvent.EventArrived += new EventArrivedEventHandler(processStopEvent_EventArrived);
             processStopEvent.Start();
         }
 
 
+
+        
         //---------------------------------------------------------------------------
         void processStartEvent_EventArrived(object sender, EventArrivedEventArgs e)
         {
@@ -173,8 +122,8 @@ namespace Vet
                 string p_name = e.NewEvent.Properties["ProcessName"].Value.ToString();
                 string pid = Convert.ToInt32(e.NewEvent.Properties["ProcessID"].Value).ToString();
 
-                data[0] = p_name;
-                data[1] = pid;
+                data[1] = p_name;
+                data[0] = pid;
 
                 item = new ListViewItem(data);
 
@@ -188,23 +137,27 @@ namespace Vet
                 //
             }
         }
-
-        void processStopEvent_EventArrived(object sender, EventArrivedEventArgs e)
-        {
-            //  string p_name = e.NewEvent.Properties["ProcessName"].Value.ToString();
-            //  string pid = Convert.ToInt32(e.NewEvent.Properties["ProcessID"].Value).ToString();
-        }
+        
 
 
         //---------------------------------------------------------------------------
-        private
-            void label1_TextChanged(object sender, EventArgs e)
+        void processStopEvent_EventArrived(object sender, EventArrivedEventArgs e)
         {
-            //Thread thread = new Thread (start__fill_process_data);
-            //thread.Start();
+            string pid = Convert.ToInt32(e.NewEvent.Properties["ProcessID"].Value).ToString();
+
+            foreach(ListViewItem item in processes_listview.Items)
+            {
+                if(item.Text == pid)
+                {
+                    
+                    item.Remove();
+                    break;
+
+                }
+            }
         }
 
-
+              
         //---------------------------------------------------------------------------
         private
             void main_form_FormClosing(object sender, FormClosingEventArgs e)
@@ -218,20 +171,92 @@ namespace Vet
 
         //---------------------------------------------------------------------------
         private
-            void button1_Click(object sender, EventArgs e)
+            void processes_listview_MouseClick(object sender, MouseEventArgs e)
         {
-            label2.Text = processes_listview.Items.Count.ToString();            
+            if (e.Button == MouseButtons.Right)
+            {
+                var focusedItem = processes_listview.FocusedItem;
+                if (focusedItem != null && focusedItem.Bounds.Contains(e.Location))
+                {
+                    rightclick_options_menu.Show(Cursor.Position);
+                }
+            }
         }
 
-       
+
+        //---------------------------------------------------------------------------
+        private
+            void rcm_open_file_location_Click(object sender, EventArgs e)
+        {
+            ListViewItem item = processes_listview.SelectedItems[0];
+
+            string program_name = processes_listview.SelectedItems[0].SubItems[1].Text;
+            string path;
+
+            using (Process pid = Process.GetProcessById(Int32.Parse(item.Text)))
+            {
+                
+                    path = "/select, \"" + pid.MainModule.FileName.Substring(0, pid.MainModule.FileName.LastIndexOf(program_name)) + "\"";
+                    Process.Start("explorer.exe", "-p" + path);
+                
+            }
+  
+        }
+
+
+        //---------------------------------------------------------------------------
+        private 
+            void rcm_kill_process_Click(object sender, EventArgs e)
+        {
+            ListViewItem item = processes_listview.SelectedItems[0];
+            using (Process pid = Process.GetProcessById(Int32.Parse(item.Text)))
+            {
+                pid.Kill();
+            }
+        }
+
+
+        //---------------------------------------------------------------------------
+        private 
+            void rcm_suspend_process_Click(object sender, EventArgs e)
+        {
+            ListViewItem item = processes_listview.SelectedItems[0];
+
+            Thread thread = new Thread(() => process_essentials.freeze_process(Int32.Parse(item.Text)));
+            thread.Start();
+        }
+
+
+        //---------------------------------------------------------------------------
+        private 
+            void rcm_resume_process_Click(object sender, EventArgs e)
+        {
+            ListViewItem item = processes_listview.SelectedItems[0];
+
+            Thread thread = new Thread(() => process_essentials.continue_process(Int32.Parse(item.Text)));
+            thread.Start();
+        }
+
+
+        //---------------------------------------------------------------------------
+        private 
+            void rcm_process_restart_Click(object sender, EventArgs e)
+        {
+            ListViewItem item = processes_listview.SelectedItems[0];
+            int process_id = Int32.Parse(item.Text);
+
+            using (Process pid = Process.GetProcessById(process_id))
+            {
+                pid.Kill();
+            }
+
+            using (Process pid = Process.GetProcessById(process_id))
+            {
+                string path = pid.MainModule.FileName;
+                Process.Start(path);
+            }
+        }
     }
-
-
-
-
-
-
-
 
 
     class change_via_thread
