@@ -26,16 +26,7 @@ namespace Vet
 
 
 
-        [DllImport("kernel32.dll")]
-        public static extern IntPtr LoadLibrary(string dllToLoad);
-
-        [DllImport("kernel32.dll")]
-        public static extern IntPtr GetProcAddress(IntPtr hModule, string procedureName);
-
-        [DllImport("kernel32.dll")]
-        public static extern bool FreeLibrary(IntPtr hModule);
-    
-
+        
 
 
         [DllImport("kernel32.dll")]
@@ -46,20 +37,6 @@ namespace Vet
         static extern int ResumeThread(IntPtr hThread);
         [DllImport("kernel32", CharSet = CharSet.Auto, SetLastError = true)]
         static extern bool CloseHandle(IntPtr handle);
-
-
-        
-        public void tst(int pid)
-        {
-            IntPtr load_k32   = LoadLibrary(@"C:\Windows\System32\kernel32.dll");
-
-            IntPtr openthread = GetProcAddress(load_k32, "OpenThread");
-            IntPtr susthread  = GetProcAddress(load_k32, "SuspendThread");
-            IntPtr resthread  = GetProcAddress(load_k32, "ResumeThread");
-
-
-        }
-
 
 
         //---------------------------------------------------------------------------
@@ -102,6 +79,78 @@ namespace Vet
                         CloseHandle(open_thread);
                     }
                 }
+            }
+        }
+
+
+        //---------------------------------------------------------------------------
+        [DllImport("user32.dll")]       
+        public static extern bool SetForegroundWindow(IntPtr handle);
+        public 
+            int bringWindowToFront(int id)
+        {
+            try
+            {
+                using (Process proc = Process.GetProcessById(id))
+                {
+                    IntPtr windowHandle = proc.MainWindowHandle;
+                    SetForegroundWindow(windowHandle);
+
+                    return 1;
+                }
+            }
+            catch (Exception)
+            {
+
+                return 0;
+            }
+
+        }
+
+
+        //---------------------------------------------------------------------------
+        [DllImport("user32.dll")]        
+        static extern bool ShowWindow(IntPtr handle, int cmd);
+        public 
+            int maximizeWindow(int id)
+        {
+            try
+            {
+                using (Process process = Process.GetProcessById(id))
+                {
+                    IntPtr windowHandle = process.MainWindowHandle;
+                    ShowWindow(windowHandle, 3);
+
+                    return 1;
+                }
+
+            }
+            catch (Exception)
+            {
+
+                return 0;
+            }
+
+        }
+
+
+        //---------------------------------------------------------------------------
+        public
+            int minimizeWindow(int id)
+        {
+            try
+            {
+                using (Process process = Process.GetProcessById(id))
+                {
+                    IntPtr windowHandle = process.MainWindowHandle;
+                    ShowWindow(windowHandle, 2);
+
+                    return 1;
+                }
+            }
+            catch (Exception)
+            {
+                return 0;
             }
         }
     }
