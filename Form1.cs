@@ -75,9 +75,10 @@ namespace Vet
 
 
         //---------------------------------------------------------------------------
-        public void setup_form_on_startup()
+        public 
+            void thread_setup_form_on_startup(int pid)
         {
-            Process[] processes = Process.GetProcesses();
+            
 
             ListViewItem item;
 
@@ -85,7 +86,7 @@ namespace Vet
             string   owner;
             string   file_name;
 
-            foreach (Process process in processes)
+            using (Process process = Process.GetProcessById(pid))
             {
                 data[0] = process.Id.ToString();
                 
@@ -97,9 +98,13 @@ namespace Vet
 
                     data[2] = owner;
                 }
-                catch (Exception)
+                catch (UnauthorizedAccessException)
                 {
                     data[2] = "Access Denied";
+                }
+                catch (Exception)
+                {
+                    data[2] = "<Unknown>";
                 }
 
                 data[1] = process.ProcessName + ".exe";
@@ -118,8 +123,22 @@ namespace Vet
                 }
                 catch (Exception)
                 {
-                    //
+                    return;
                 }
+            }
+        }
+
+
+        //---------------------------------------------------------------------------
+        void
+            setup_form_on_startup()
+        {
+            Process[] processes = Process.GetProcesses();
+
+            foreach(Process process in processes)
+            {
+                Thread thread = new Thread(() => thread_setup_form_on_startup(process.Id));
+                thread.Start();
             }
         }
 
@@ -222,7 +241,7 @@ namespace Vet
 
 
                         DateTime starttime = DateTime.Now;
-
+                        DateTime killtime;
 
 
                         using (Process process = Process.GetProcessById(Int32.Parse(pid)))
@@ -230,11 +249,10 @@ namespace Vet
                             if (terminate_blocked_process_rb.Checked)
                             {
 
-
-                                watchdog_logger.Items.Add("Process " + p_name + " (" + pid + ")" + " started. // " + starttime);
-                                process.Kill();
-                                DateTime killtime = DateTime.Now;
-                                watchdog_logger.Items.Add("Process " + p_name + " (" + pid + ")" + " terminated! // " + killtime);
+                 
+                                //watchdog_logger.Items.Add("["+starttime+"]"+"  "+p_name + " (" + pid + ")" +" Started!");
+                                process.Kill(); killtime = DateTime.Now;
+                                watchdog_logger.Items.Add("[" + killtime + "]" + "  " + p_name + " (" + pid + ")" + " Terminated!");
 
 
                             }
@@ -243,10 +261,9 @@ namespace Vet
                             {
 
 
-                                watchdog_logger.Items.Add("Process " + p_name + " (" + pid + ")" + " started. // " + starttime);
-                                process_essentials.freeze_process(process.Id);
-                                DateTime killtime = DateTime.Now;
-                                watchdog_logger.Items.Add("Process " + p_name + " (" + pid + ")" + " suspended! // " + killtime);
+                                //watchdog_logger.Items.Add("[" + starttime + "]" + "  " + p_name + " (" + pid + ")" + " started!");
+                                process_essentials.freeze_process(process.Id); killtime = DateTime.Now;
+                                watchdog_logger.Items.Add("[" + killtime + "]" + "  " + p_name + " (" + pid + ")" + " Suspended!");
 
 
                             }
@@ -266,20 +283,32 @@ namespace Vet
                 data[1] = p_name;
                 data[0] = pid;
 
-                using (Process process = Process.GetProcessById(Int32.Parse(pid)))
+                try
                 {
-                    try
-                    {
-                        file_name = process.MainModule.FileName;
-                        owner     = File.GetAccessControl(file_name).GetOwner(typeof(System.Security.Principal.NTAccount)).ToString().Split('\\')[1];
-                        data[2]   = owner;
-                    }
-                    catch (Exception)
-                    {
-                        data[2] = "Access Denied";      //  System processes that require trust certs.
-                    }
 
-                    
+                    using (Process process = Process.GetProcessById(Int32.Parse(pid)))
+                    {
+                        try
+                        {
+                            file_name = process.MainModule.FileName;
+                            owner     = File.GetAccessControl(file_name).GetOwner(typeof(System.Security.Principal.NTAccount)).ToString().Split('\\')[1];
+                            data[2]   = owner;
+                        }
+                        catch (UnauthorizedAccessException)
+                        {
+                            data[2] = "Access Denied";
+                        }
+                        catch (Exception)
+                        {
+                            data[2] = "<Unknown>";      //  System processes that require trust certs.
+                        }
+
+
+                    }
+                }
+                catch (ArgumentException)
+                {
+                    return;  //  Usually if process has exited before we build to listview
                 }
             }
           
@@ -304,7 +333,8 @@ namespace Vet
 
 
         //---------------------------------------------------------------------------
-        void processStopEvent_EventArrived(object sender, EventArrivedEventArgs e)
+        void 
+            processStopEvent_EventArrived(object sender, EventArrivedEventArgs e)
         {
             string pid = Convert.ToInt32(e.NewEvent.Properties["ProcessID"].Value).ToString();
 
@@ -369,10 +399,8 @@ namespace Vet
                 catch (UnauthorizedAccessException)
                 {
                     //
-                }
-                
-            }
-  
+                }               
+            } 
         }
 
 
@@ -380,7 +408,7 @@ namespace Vet
         private 
             void rcm_kill_process_Click(object sender, EventArgs e)
         {
-            ListViewItem item = processes_listview.SelectedItems[0];
+            ListViewItem item  = processes_listview.SelectedItems[0];
 
             using (Process pid = Process.GetProcessById(Int32.Parse(item.Text)))
             {
@@ -423,17 +451,43 @@ namespace Vet
             void rcm_process_restart_Click(object sender, EventArgs e)
         {
             ListViewItem item = processes_listview.SelectedItems[0];
-            int process_id = Int32.Parse(item.Text);
+            int process_id    = Int32.Parse(item.Text);
+            string path;
 
             using (Process pid = Process.GetProcessById(process_id))
             {
-                pid.Kill();
+                try
+                {
+                    pid.Kill();
+                }
+                catch (UnauthorizedAccessException)
+                {
+
+                    return;     //  If we don't have permission to kill, then most likely won't have permission
+                                //  for catching mainmodule.
+                }
             }
 
+            
             using (Process pid = Process.GetProcessById(process_id))
             {
-                string path = pid.MainModule.FileName;
-                Process.Start(path);
+                try
+                {
+                    path = pid.MainModule.FileName;
+
+                    if (string.IsNullOrEmpty(path))
+                    {
+                        return;
+                    }
+                    else
+                    {
+                        Process.Start(path);
+                    }
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    //
+                }     
             }
         }
 
@@ -484,8 +538,6 @@ namespace Vet
             void rcm_add_process_blocklist_Click(object sender, EventArgs e)
         {
             ListViewItem item = processes_listview.SelectedItems[0];
-
-
 
             int process_id      = Int32.Parse(item.Text);
             string program_name = processes_listview.SelectedItems[0].SubItems[1].Text;
@@ -574,6 +626,44 @@ namespace Vet
         private void watchdog_setting_gb_Enter(object sender, EventArgs e)
         {
 
+        }
+
+
+
+        private 
+            void blockeprocesses_lb_MouseClick(object sender, MouseEventArgs e)
+        {
+            
+        }
+
+        private void rcm_blockedproclb_Remove_Click(object sender, EventArgs e)
+        {
+            int item = blockeprocesses_lb.SelectedIndex;
+
+            try
+            {
+                blockeprocesses_lb.Items.RemoveAt(item);
+            }
+            catch (IndexOutOfRangeException)
+            {
+                //
+            }
+            catch (Exception)
+            {
+                //
+            }
+        }
+
+        private void blockeprocesses_lb_MouseDown(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Right)
+            {
+
+                var focusedItem = blockeprocesses_lb.IndexFromPoint(e.Location);
+                rightclick_option_blocked_processes.Show(Cursor.Position);
+                rightclick_option_blocked_processes.Visible = true;
+
+            }
         }
     }
 
