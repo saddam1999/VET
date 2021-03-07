@@ -24,7 +24,7 @@ namespace Vet
         ProcessEssentials process_essentials = new ProcessEssentials();
 
 
-        public List<string> blocked_process_list = new List<string>();
+        //  public List<string> blocked_process_list = new List<string>();
 
 
 
@@ -49,6 +49,7 @@ namespace Vet
                             change_via_thread.ControlInvoke(processes_listview, () => item.Remove());
 
                         }
+                        Thread.Sleep(30);   //  Reducing cpu usage
                     }
                 }
                 catch (Exception)
@@ -56,7 +57,7 @@ namespace Vet
                     continue;
                 }
 
-                Thread.Sleep(250);
+                Thread.Sleep(5000);        //          ^
             }           
         }
 
@@ -67,8 +68,8 @@ namespace Vet
             while (true)
             {
 
-                change_via_thread.ControlInvoke(processes_listview, () => toolstrip_processes_count.Text = processes_listview.Items.Count.ToString()); ;
-                Thread.Sleep(250);
+                change_via_thread.ControlInvoke(processes_listview, () => toolstrip_processes_count.Text = "Processes: "+processes_listview.Items.Count.ToString()); ;
+                Thread.Sleep(600);
 
             }
         }
@@ -82,12 +83,17 @@ namespace Vet
 
             ListViewItem item;
 
-            string[] data = new string[3];          
+            string[] data = new string[4];          
             string   owner;
             string   file_name;
+            bool is_responding;
+
+
 
             using (Process process = Process.GetProcessById(pid))
             {
+                is_responding = process.Responding;
+
                 data[0] = process.Id.ToString();
                 
 
@@ -98,33 +104,42 @@ namespace Vet
 
                     data[2] = owner;
                 }
-                catch (UnauthorizedAccessException)
+                catch (Win32Exception)
                 {
                     data[2] = "Access Denied";
                 }
                 catch (Exception)
                 {
-                    data[2] = "<Unknown>";
+                    data[2] = "<Unknown, Error>";
                 }
 
                 data[1] = process.ProcessName + ".exe";
+
+
+                if (is_responding)
+
+                    data[3] = "Running";
+
+                else
+                
+                    data[3] = "Suspended";
                 
 
                 item = new ListViewItem(data);
 
+            }
 
-                try
-                {
+            try
+            {
 
-                    change_via_thread.ControlInvoke(processes_listview, () => processes_listview.BeginUpdate());
-                    change_via_thread.ControlInvoke(processes_listview, () => processes_listview.Items.Add(item));
-                    change_via_thread.ControlInvoke(processes_listview, () => processes_listview.EndUpdate());
+                change_via_thread.ControlInvoke(processes_listview, () => processes_listview.BeginUpdate());
+                change_via_thread.ControlInvoke(processes_listview, () => processes_listview.Items.Add(item));
+                change_via_thread.ControlInvoke(processes_listview, () => processes_listview.EndUpdate());
 
-                }
-                catch (Exception)
-                {
-                    return;
-                }
+            }
+            catch (Exception)
+            {
+                return;
             }
         }
 
@@ -154,21 +169,33 @@ namespace Vet
             processes_listview.Columns.Add("ID", 90);
             processes_listview.Columns.Add("NAME", 170);
             processes_listview.Columns.Add("OWNER", 120);
+            processes_listview.Columns.Add("STATUS", 120);
 
-            Thread build_start_process = new Thread(setup_form_on_startup);
+            Task build_start_process = new Task(setup_form_on_startup);
             build_start_process.Start();
+            build_start_process.Wait(); 
+            build_start_process.Dispose();
+
+
+            Task task = new Task(update_vetted_processList);
+            task.Start();
 
             Thread remove_old_pids = new Thread(remove_dead_pids);
             remove_old_pids.Start();
 
-            Thread update_counter = new Thread(update_vetted_processList);
-            update_counter.Start();
+           // Thread update_counter = new Thread(update_vetted_processList);
+           // update_counter.Start();
 
-            Thread add_new_spawned_process = new Thread(start_AddNewprocess);
+            
+
+            Task add_new_spawned_process = new Task(start_AddNewprocess);
             add_new_spawned_process.Start();
 
-            Thread remove_old_processes = new Thread(start_RemoveOldProcess);
-            remove_old_processes.Start();           
+            Task remove_old_processes = new Task(start_RemoveOldProcess);
+            remove_old_processes.Start();   
+            
+
+
         }
 
 
@@ -199,14 +226,15 @@ namespace Vet
 
             ListViewItem item;
 
-            string p_name;                       
-            string pid;
-            string owner;
-            string file_name;
+            string   p_name;                       
+            string   pid;
+            string   owner;
+            string   file_name;
 
-            string[] data = new string[3];
-            bool found    = false;
-
+            string[] data     = new string[4];
+            bool     found    = false;
+            bool     is_responding;
+            bool     is_suspending = toolstrip_watchdog_suspendonstart.Checked;
 
 
             pid    = Convert.ToInt32(e.NewEvent.Properties["ProcessID"].Value).ToString();
@@ -216,13 +244,15 @@ namespace Vet
             if (string.IsNullOrEmpty(pid))
             
 
-                return;
+                return;         //  Don't even attempt listing the process.
 
 
             else
             {
 
+
                 found = true;
+
 
             }
 
@@ -236,6 +266,9 @@ namespace Vet
 
                 foreach (var blocked_item in blockeprocesses_lb.Items)
                 {
+
+                    
+
                     if (p_name == blocked_item.ToString())
                     {
 
@@ -246,55 +279,70 @@ namespace Vet
 
                         using (Process process = Process.GetProcessById(Int32.Parse(pid)))
                         {
-                            if (terminate_blocked_process_rb.Checked)
+                            
+
+                            if (is_suspending)
                             {
 
-                 
-                                //watchdog_logger.Items.Add("["+starttime+"]"+"  "+p_name + " (" + pid + ")" +" Started!");
+                                
+                                process_essentials.freeze_process(process.Id); killtime = DateTime.Now;
+                                watchdog_logger.Items.Add("[" + killtime + "]" + "  " + p_name + " (" + pid + ")" + " Suspended!");
+
+
+                            }
+                            else
+                            {
+                                
+
                                 process.Kill(); killtime = DateTime.Now;
                                 watchdog_logger.Items.Add("[" + killtime + "]" + "  " + p_name + " (" + pid + ")" + " Terminated!");
 
 
                             }
 
-                            if (suspend_blocked_process_rb.Checked)
-                            {
-
-
-                                //watchdog_logger.Items.Add("[" + starttime + "]" + "  " + p_name + " (" + pid + ")" + " started!");
-                                process_essentials.freeze_process(process.Id); killtime = DateTime.Now;
-                                watchdog_logger.Items.Add("[" + killtime + "]" + "  " + p_name + " (" + pid + ")" + " Suspended!");
-
-
-                            }
                             
                         }
 
-                        return;     //  If process is part of user "WatchDog" it is either getting suspended or terminated
-                                    //  on start, so there is really no need to waste process time and memory filling out the listview of a "dead" / 
-                                    //  "soon to be dead" process ...
+                        
+                        if(!is_suspending)
+                              return;        //  If process is part of watchdog it will either be getting suspend or terminated on start.
+                                             //
+                                             //  If the suspend option is FALSE then we just return the thread because there will be no 
+                                             //  point in using processor juice filling out the listview with process info when it will just
+                                             //  be remove in seconds.
+                                             //
+                                             //  If the suspend option is TRUE we continue on with displaying the process in listview as it will
+                                             //  still be consuming memory on the machine, and not become a "ghost process" just sitting in the 
+                                             //  background not doing anything ... This way the user can still at the least kill the process.
+
+                        
                     }
                 }
 
 
-                /* IF PROCESS IS NOT IN WATCHDOG ...*/
+                /* IF PROCESS IS NOT IN WATCHDOG or is being SUSPENDED ...*/
 
 
                 data[1] = p_name;
                 data[0] = pid;
 
+
                 try
                 {
 
+
                     using (Process process = Process.GetProcessById(Int32.Parse(pid)))
                     {
+
+                        is_responding = process.Responding;
+
                         try
                         {
                             file_name = process.MainModule.FileName;
                             owner     = File.GetAccessControl(file_name).GetOwner(typeof(System.Security.Principal.NTAccount)).ToString().Split('\\')[1];
                             data[2]   = owner;
                         }
-                        catch (UnauthorizedAccessException)
+                        catch (Win32Exception)
                         {
                             data[2] = "Access Denied";
                         }
@@ -303,13 +351,25 @@ namespace Vet
                             data[2] = "<Unknown>";      //  System processes that require trust certs.
                         }
 
+                        if (is_responding)
+
+                            data[3] = "Running";
+
+                        else
+                        {
+                            data[3] = "Suspended";
+                        }
 
                     }
+
+
                 }
                 catch (ArgumentException)
                 {
-                    return;  //  Usually if process has exited before we build to listview
+                    return;                            //  Usually if process has exited before we build to listview
                 }
+
+
             }
           
 
@@ -529,7 +589,32 @@ namespace Vet
         private
             void processes_listview_KeyDown(object sender, KeyEventArgs e)
         {
-            
+            if (e.KeyCode == Keys.Delete)
+            {
+                int process_id;
+
+                foreach (ListViewItem item in processes_listview.SelectedItems)
+                {
+                    process_id = Int32.Parse(item.Text);
+
+                    using (Process process = Process.GetProcessById(process_id))
+                    {
+                        try
+                        {
+                            process.Kill();
+                        }
+                        catch (UnauthorizedAccessException)
+                        {
+                            
+                            continue;  //
+                        }
+                        catch (ArgumentException)
+                        {
+                            continue; //
+                        }
+                    }
+                }
+            }
         }
 
 
@@ -557,7 +642,7 @@ namespace Vet
             }
 
             blockeprocesses_lb.Items.Add(program_name);
-            blocked_process_list.Add(program_name);
+            //  blocked_process_list.Add(program_name);
         }
 
 
@@ -597,9 +682,7 @@ namespace Vet
                 blockeprocesses_lb.ForeColor                              = Color.LightGreen;
                 watchdog_logger.BackColor                                 = Color.Black;
                 watchdog_logger.ForeColor                                 = Color.LightBlue;
-                suspend_blocked_process_rb.ForeColor                      = Color.Gold;
-                terminate_blocked_process_rb.ForeColor                    = Color.Gold;
-                save_blocked_processes_for_next_session_load_cb.ForeColor = Color.Gold;
+                
 
             }
 
@@ -617,9 +700,7 @@ namespace Vet
                 blockeprocesses_lb.ForeColor                              = Color.Black;
                 watchdog_logger.BackColor                                 = Color.White;
                 watchdog_logger.ForeColor                                 = Color.Black;
-                suspend_blocked_process_rb.ForeColor                      = Color.Black;
-                terminate_blocked_process_rb.ForeColor                    = Color.Black;
-                save_blocked_processes_for_next_session_load_cb.ForeColor = Color.Black;
+                
             }
         }
 
@@ -665,6 +746,13 @@ namespace Vet
 
             }
         }
+
+        private void toolstrip_watchdog_clearlist_Click(object sender, EventArgs e)
+        {
+            blockeprocesses_lb.Items.Clear();
+        }
+
+        
     }
 
 
