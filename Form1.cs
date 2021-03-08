@@ -28,7 +28,42 @@ namespace Vet
 
 
 
+        private 
+            void getCPUsage()
+        {
+            while (true)
+            {
+                try
+                {
 
+                    using (PerformanceCounter system_cpu_usage = new PerformanceCounter("Processor", "% Processor Time", "_Total"))
+                    {
+                        var first = system_cpu_usage.NextValue();
+                        Thread.Sleep(1000);
+                        
+
+                        if (Int32.Parse(system_cpu_usage.NextValue().ToString().Split('.')[0]) < 1)
+                        {
+
+                            change_via_thread.ControlInvoke(processes_listview, () => toolstrip_cpu_label.Text = "CPU: < 1%");
+
+                        }
+                        else
+                        {
+                            var second = system_cpu_usage.NextValue();
+                            change_via_thread.ControlInvoke(processes_listview, () => toolstrip_cpu_label.Text = "CPU: " + system_cpu_usage.NextValue().ToString().Split('.')[0] + "%");
+
+                        }
+                                             
+                    }
+
+                }
+                catch (Exception)
+                {
+                    continue;
+                }
+            }          
+        }
 
 
         //---------------------------------------------------------------------------
@@ -86,7 +121,7 @@ namespace Vet
             string[] data = new string[4];          
             string   owner;
             string   file_name;
-            bool is_responding;
+            bool     is_responding;
 
 
 
@@ -171,30 +206,33 @@ namespace Vet
             processes_listview.Columns.Add("OWNER", 120);
             processes_listview.Columns.Add("STATUS", 120);
 
-            Task build_start_process = new Task(setup_form_on_startup);
-            build_start_process.Start();
-            build_start_process.Wait(); 
-            build_start_process.Dispose();
 
+
+            using (Task build_start_process = new Task(setup_form_on_startup))
+            {
+                build_start_process.Start();
+                build_start_process.Wait();
+            }
+
+           
+                
 
             Task task = new Task(update_vetted_processList);
             task.Start();
 
-            Thread remove_old_pids = new Thread(remove_dead_pids);
+            Task update_system_cpu_usage = new Task(new Action(getCPUsage));
+            update_system_cpu_usage.Start();
+
+            Task remove_old_pids = new Task( () => remove_dead_pids());
             remove_old_pids.Start();
-
-           // Thread update_counter = new Thread(update_vetted_processList);
-           // update_counter.Start();
-
-            
 
             Task add_new_spawned_process = new Task(start_AddNewprocess);
             add_new_spawned_process.Start();
 
             Task remove_old_processes = new Task(start_RemoveOldProcess);
-            remove_old_processes.Start();   
-            
+            remove_old_processes.Start();
 
+            
 
         }
 
