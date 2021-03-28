@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Vet
@@ -53,6 +54,30 @@ namespace Vet
         static extern bool CloseHandle(
             IntPtr handle
             );
+
+        [DllImport("psapi.dll")]
+        static extern int EmptyWorkingSet(
+            IntPtr hwProc
+            );
+
+
+        public void clear_footprints()
+        {
+            int pid;
+
+            using (Process current_process = Process.GetCurrentProcess())
+            {
+                pid = current_process.Id;
+            }
+
+            while (true)
+            {
+                
+                EmptyWorkingSet(Process.GetCurrentProcess().Handle);          
+                Thread.Sleep(10000);
+            }
+        }
+
 
 
         //---------------------------------------------------------------------------
