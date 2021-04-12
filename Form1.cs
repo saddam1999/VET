@@ -16,18 +16,24 @@ namespace Vet
 {
 
 
-    struct PROCESS_STARTED_EVENT_VAR    //  These variable are being called evertime a process starts
-                                        //  so they we be placed in a struct for better memory managment.
-    {
-        public string p_name;
-        public string pid;
-        public string owner;
-        public string file_name;
-
-        public ListViewItem item;
+    internal struct PROCESS_STARTED_EVENT_VAR
+    { 
+        internal string p_name;
+        internal string pid;
+        internal string owner;
+        internal string file_name;
+        internal string[] data;
+        internal ListViewItem item;
     }
 
 
+    internal struct SETUP_FORM_VAR
+    {
+        internal string owner;
+        internal string file_name;
+        internal ListViewItem item;
+        internal string[] data;
+    }
 
     
     public partial class main_form : Form
@@ -37,12 +43,19 @@ namespace Vet
             InitializeComponent();
         }
 
-        ProcessEssentials process_essentials = new ProcessEssentials();
-
-
-
         
 
+
+        private struct main_essentials
+        {
+            public Task[] form_load_tasks;
+        }
+
+
+
+
+        main_essentials essentials           = new main_essentials();
+        ProcessEssentials process_essentials = new ProcessEssentials();
 
         void displaySystemUsage()
         {
@@ -109,13 +122,13 @@ namespace Vet
                     foreach (ListViewItem item in processes_listview.Items)
                     {
                         bool found = Process.GetProcesses().Any(x => x.Id == Int32.Parse(item.Text));
+                        
+                            if (!found)
+                            {
 
-                        if (!found)
-                        {
+                                change_via_thread.ControlInvoke(processes_listview, () => item.Remove());
 
-                            change_via_thread.ControlInvoke(processes_listview, () => item.Remove());
-
-                        }
+                            }
                         Thread.Sleep(30);   //  Reducing cpu usage
                     }
                 }
@@ -124,7 +137,7 @@ namespace Vet
                     continue;
                 }
 
-                Thread.Sleep(5000);        //          ^
+                Thread.Sleep(10000);        //          ^
             }           
         }
 
@@ -145,93 +158,57 @@ namespace Vet
 
         //---------------------------------------------------------------------------
         private 
-            void thread_setup_form_on_startup(int pid)
+            void _display_processes_startup(int pid)
         {
-            
 
-            ListViewItem item;
-
-            string[] data = new string[5];          
-            string   owner;
-            string   file_name;
-            
+            SETUP_FORM_VAR variable_essentials = new SETUP_FORM_VAR();          
+            variable_essentials.data           = new string[5];                     
 
 
 
             using (Process process = Process.GetProcessById(pid))
             {
-                
 
-                data[0] = process.Id.ToString();
-                
-
-                try
-                {
-                    file_name = process.MainModule.FileName;
-                    owner     = File.GetAccessControl(file_name).GetOwner(typeof(System.Security.Principal.NTAccount)).ToString().Split('\\')[1];
-
-                    data[2] = owner;
-
-                   
-                }
-                catch (Win32Exception)
-                {
-                    data[2] = "Access Denied";
-                }
-                catch (Exception)
-                {
-                    data[2] = "<Unknown, Error>";
-                }
-
-
-
-                
-
-
-
-                data[1] = process.ProcessName + ".exe";
-
-
+                variable_essentials.data[0]   = process.Id.ToString();
+                variable_essentials.data[1]   = process.ProcessName + ".exe";
+                variable_essentials.file_name = null;
 
                 try
                 {
-                    data[3] = process.MainModule.FileVersionInfo.CompanyName;
+                    variable_essentials.file_name = process.MainModule.FileName;    //  If we can't get access to the mainmodule then we will
+                                                                                    //  have permission issues with other things, so i'm just going
+                                                                                    //  too hard-code them a "access denied" if this ever happens.
                 }
                 catch (Win32Exception)
                 {
-                    data[3] = "Access Denied";
+                    variable_essentials.data[2] = "Access Denied";
+                    variable_essentials.data[3] = "Access Denied";
+                    variable_essentials.data[4] = "Access Denied";
                 }
-                catch (Exception)
+
+                if (!string.IsNullOrWhiteSpace(variable_essentials.file_name))   
                 {
-                    data[3] = "<Unknown, Error>";
+
+
+                    variable_essentials.data[2] = File.GetAccessControl(variable_essentials.file_name).GetOwner(typeof(System.Security.Principal.NTAccount)).ToString().Split('\\')[1];
+                    variable_essentials.data[3] = process.MainModule.FileVersionInfo.CompanyName;
+                    variable_essentials.data[4] = process.MainModule.FileVersionInfo.FileVersion;
+
+
                 }
-
-
-                try
-                {
-                    data[4] = process.MainModule.FileVersionInfo.FileVersion;
-                }
-                catch (Win32Exception)
-                {
-                    data[4] = "Access Denied";
-                }
-                catch (Exception)
-                {
-                    data[4] = "<Unknown, Error>";
-                }
-
-
-                item = new ListViewItem(data);
-
                 
 
+                
+                
             }
+
+            variable_essentials.item = new ListViewItem(variable_essentials.data);
 
             try
             {
 
                 change_via_thread.ControlInvoke(processes_listview, () => processes_listview.BeginUpdate());
-                change_via_thread.ControlInvoke(processes_listview, () => processes_listview.Items.Add(item));
+                change_via_thread.ControlInvoke(processes_listview, () => processes_listview.Items.Add(variable_essentials.item));
                 change_via_thread.ControlInvoke(processes_listview, () => processes_listview.EndUpdate());
 
             }
@@ -248,16 +225,14 @@ namespace Vet
         {
             Process[] processes = Process.GetProcesses();
 
-
-            foreach (Process process in processes)
+            
+            
+            foreach(Process process in processes)
             {
-
-
-                Thread thread = new Thread(() => thread_setup_form_on_startup(process.Id));
+                Thread thread = new Thread(() => _display_processes_startup(process.Id));
                 thread.Start();
-
-
             }
+            
         }
 
 
@@ -280,29 +255,21 @@ namespace Vet
             using (Task build_start_process = new Task(setup_form_on_startup))
             {
                 build_start_process.Start();
-                build_start_process.Wait();
+                build_start_process.Wait();     
             }
 
-           
-                
 
-            Task task = new Task(update_vetted_processList);
-            task.Start();
-
-            Task update_system_cpu_usage = new Task(new Action(displaySystemUsage));
-            update_system_cpu_usage.Start();
-
-            Task remove_old_pids = new Task( () => remove_dead_pids());
-            remove_old_pids.Start();
-
-            Task add_new_spawned_process = new Task(start_AddNewprocess);
-            add_new_spawned_process.Start();
-
-            Task remove_old_processes = new Task(start_RemoveOldProcess);
-            remove_old_processes.Start();
+            essentials.form_load_tasks = new Task[5];
 
 
 
+            essentials.form_load_tasks[0] = Task.Run(() => { displaySystemUsage(); });
+            essentials.form_load_tasks[1] = Task.Run(() => { update_vetted_processList(); });
+            essentials.form_load_tasks[2] = Task.Run(() => { remove_dead_pids(); });
+            essentials.form_load_tasks[3] = Task.Run(() => { start_AddNewprocess(); });
+            essentials.form_load_tasks[4] = Task.Run(() => { start_RemoveOldProcess(); });
+
+            
 
             Task clear_pages_task = new Task(process_essentials.clear_footprints);
             clear_pages_task.Start();
@@ -330,8 +297,6 @@ namespace Vet
 
 
         //---------------------------------------------------------------------------
-
-
         void processStartEvent_EventArrived(object sender, EventArrivedEventArgs e)
         {
 
@@ -341,33 +306,29 @@ namespace Vet
 
 
 
-            bool     found         = false;
-            bool     is_suspending = toolstrip_watchdog_suspendonstart.Checked;
-            string[] data          = new string[5];
+            bool     found                    = false;
+            bool     is_suspending            = toolstrip_watchdog_suspendonstart.Checked;
+            variable_essentials.data          = new string[5];
             
             
 
-            variable_essentials.pid = Convert.ToInt32(e.NewEvent.Properties["ProcessID"].Value).ToString();
+            variable_essentials.pid    = Convert.ToInt32(e.NewEvent.Properties["ProcessID"].Value).ToString();
             variable_essentials.p_name = e.NewEvent.Properties["ProcessName"].Value.ToString();
 
 
-            if (string.IsNullOrEmpty(variable_essentials.pid))
-            
 
+
+            if (string.IsNullOrWhiteSpace(variable_essentials.pid))
+            
                 return;         //  Don't even attempt listing the process.
 
 
             else
-            {
-
-
+            
                 found = true;
 
 
-            }
 
-
-            
 
 
             if (found)
@@ -430,11 +391,9 @@ namespace Vet
                 }
 
 
-                /* IF PROCESS IS NOT IN WATCHDOG or is being SUSPENDED ...*/
 
-
-                data[1] = variable_essentials.p_name;
-                data[0] = variable_essentials.pid;
+                variable_essentials.data[1] = variable_essentials.p_name;
+                variable_essentials.data[0] = variable_essentials.pid;
 
 
                 try
@@ -444,47 +403,34 @@ namespace Vet
                     using (Process process = Process.GetProcessById(Int32.Parse(variable_essentials.pid)))
                     {
 
-                        
+
+
+                        variable_essentials.data[0]   = process.Id.ToString();
+                        variable_essentials.data[1]   = process.ProcessName + ".exe";
+                        variable_essentials.file_name = null;
 
                         try
                         {
-                            variable_essentials.file_name = process.MainModule.FileName;
-                            variable_essentials.owner = File.GetAccessControl(variable_essentials.file_name).GetOwner(typeof(System.Security.Principal.NTAccount)).ToString().Split('\\')[1];
-                            data[2]   = variable_essentials.owner;
+                            variable_essentials.file_name = process.MainModule.FileName;    //  If we can't get access to the mainmodule then we will
+                                                                                            //  have permission issues with other things, so i'm just going
+                                                                                            //  too hard-code them a "access denied" if this ever happens.
                         }
                         catch (Win32Exception)
                         {
-                            data[2] = "Access Denied";
-                        }
-                        catch (Exception)
-                        {
-                            data[2] = "<Unknown, Error>";     //  System processes that require trust certs.
+                            variable_essentials.data[2] = "Access Denied";
+                            variable_essentials.data[3] = "Access Denied";
+                            variable_essentials.data[4] = "Access Denied";
                         }
 
-                        try
+                        if (!string.IsNullOrWhiteSpace(variable_essentials.file_name))
                         {
-                            data[3] = process.MainModule.FileVersionInfo.CompanyName;
-                        }
-                        catch (Win32Exception)
-                        {
-                            data[3] = "Access Denied";
-                        }
-                        catch (Exception)
-                        {
-                            data[3] = "<Unknown, Error>";
-                        }
 
-                        try
-                        {
-                            data[4] = process.MainModule.FileVersionInfo.FileVersion;
-                        }
-                        catch (Win32Exception)
-                        {
-                            data[4] = "Access Denied";
-                        }
-                        catch (Exception)
-                        {
-                            data[4] = "<Unknown, Error>";
+
+                            variable_essentials.data[2] = File.GetAccessControl(variable_essentials.file_name).GetOwner(typeof(System.Security.Principal.NTAccount)).ToString().Split('\\')[1];
+                            variable_essentials.data[3] = process.MainModule.FileVersionInfo.CompanyName;
+                            variable_essentials.data[4] = process.MainModule.FileVersionInfo.FileVersion;
+
+
                         }
                     }
 
@@ -492,14 +438,12 @@ namespace Vet
                 }
                 catch (ArgumentException)
                 {
-                    return;                            //  Usually if process has exited before we build to listview
+                    return;     //  Usually if process has exited before we write to listview
                 }
-
-
             }
 
 
-            variable_essentials.item = new ListViewItem(data);
+            variable_essentials.item = new ListViewItem(variable_essentials.data);
 
 
             try
@@ -512,7 +456,7 @@ namespace Vet
             }
             catch (Exception)
             {
-                //
+                return;
             }
         }
         
@@ -541,9 +485,11 @@ namespace Vet
         private
             void main_form_FormClosing(object sender, FormClosingEventArgs e)
         {
-
-            Process process = Process.GetCurrentProcess();
-            process.Kill();
+            using (Process process = Process.GetCurrentProcess())
+            {
+                process.Kill();
+            }
+                
 
         }
 
@@ -571,21 +517,29 @@ namespace Vet
             void rcm_open_file_location_Click(object sender, EventArgs e)
         {
             ListViewItem item = processes_listview.SelectedItems[0];
-
-            string program_name = processes_listview.SelectedItems[0].SubItems[1].Text;
-            string path;
+            Process open_and_select_file = null;
 
             using (Process pid = Process.GetProcessById(Int32.Parse(item.Text)))
             {
                 try
                 {
-                    path = "/select, \"" + pid.MainModule.FileName.Substring(0, pid.MainModule.FileName.LastIndexOf(program_name)) + "\"";
-                    Process.Start("explorer.exe", "-p" + path);
+                    //path = pid.MainModule.FileName.Substring(0, pid.MainModule.FileName.LastIndexOf(program_name)) + "\"";
+
+                    open_and_select_file = Process.Start("explorer.exe", string.Format("/select,\"{0}", pid.MainModule.FileName));
+
+                    if(open_and_select_file == null)
+                    
+                        throw new InvalidOperationException("Failed starting process!");
+                    
                 }
-                catch (UnauthorizedAccessException)
+                catch (Win32Exception)
                 {
                     //
-                }               
+                }
+                catch (FileNotFoundException)
+                {
+                    //
+                }
             } 
         }
 
@@ -601,8 +555,8 @@ namespace Vet
                 try
                 {
                     pid.Kill();
-                }
-                catch (UnauthorizedAccessException)
+                }              
+                catch (Win32Exception)
                 {
                     //
                 }
@@ -646,7 +600,7 @@ namespace Vet
         {
             ListViewItem item = processes_listview.SelectedItems[0];
             int process_id    = Int32.Parse(item.Text);
-            string path;
+            string path       = null;
 
             using (Process pid = Process.GetProcessById(process_id))
             {
@@ -654,7 +608,7 @@ namespace Vet
                 {
                     pid.Kill();
                 }
-                catch (UnauthorizedAccessException)
+                catch (Win32Exception)
                 {
 
                     return;     //  If we don't have permission to kill, then most likely won't have permission
@@ -668,20 +622,21 @@ namespace Vet
                 try
                 {
                     path = pid.MainModule.FileName;
-
-                    if (string.IsNullOrEmpty(path))
-                    {
-                        return;
-                    }
-                    else
-                    {
-                        Process.Start(path);
-                    }
                 }
                 catch (UnauthorizedAccessException)
                 {
                     //
-                }     
+                }
+
+                if (string.IsNullOrEmpty(path))
+                    
+                        return;
+                    
+                    else
+                    
+                        Process.Start(path);
+                    
+                
             }
         }
 
@@ -769,14 +724,13 @@ namespace Vet
                 {
                     pid.Kill();
                 }               
-                catch (UnauthorizedAccessException)
+                catch (Win32Exception)
                 {
                     //
                 }
             }
 
-            blockeprocesses_lb.Items.Add(program_name);
-            //  blocked_process_list.Add(program_name);
+            blockeprocesses_lb.Items.Add(program_name);           
         }
 
 
@@ -805,6 +759,8 @@ namespace Vet
                 toolstrip_diskusage_label.ForeColor = Color.LightGreen;
                 toolstrip_memory_label.ForeColor = Color.LightGreen;
                 watchdog_process_groupbox.ForeColor = Color.Gold;
+                watchdog_logger_groupbox.ForeColor = Color.Gold;
+                toolstrip_count_searched_processes_lbl.ForeColor = Color.LightGreen;
                 this.BackColor = Color.Black;
 
             }
@@ -831,6 +787,8 @@ namespace Vet
                 toolstrip_diskusage_label.ForeColor = Color.Black;
                 toolstrip_memory_label.ForeColor = Color.Black;
                 watchdog_process_groupbox.ForeColor = Color.Black;
+                watchdog_logger_groupbox.ForeColor = Color.Black;
+                toolstrip_count_searched_processes_lbl.ForeColor = Color.Black;
                 this.BackColor = Color.White;
                 
             }
@@ -848,6 +806,8 @@ namespace Vet
         {
             
         }
+
+
 
         private void rcm_blockedproclb_Remove_Click(object sender, EventArgs e)
         {
@@ -867,7 +827,8 @@ namespace Vet
             }
         }
 
-        private void blockeprocesses_lb_MouseDown(object sender, MouseEventArgs e)
+        private 
+            void blockeprocesses_lb_MouseDown(object sender, MouseEventArgs e)
         {
             if (e.Button == MouseButtons.Right)
             {
@@ -879,15 +840,69 @@ namespace Vet
             }
         }
 
-        private void toolstrip_watchdog_clearlist_Click(object sender, EventArgs e)
+        private 
+            void toolstrip_watchdog_clearlist_Click(object sender, EventArgs e)
         {
             blockeprocesses_lb.Items.Clear();
         }
 
-        private void toolstrip_search_for_process_Click(object sender, EventArgs e)
+        private 
+            void toolstrip_search_for_process_Click(object sender, EventArgs e)
         {
             search_process_form form = new search_process_form();
-            form.Show();    
+            form.Show();           
+        }
+
+        private 
+            void toolstrip_process_lookup_textbox_KeyDown(object sender, KeyEventArgs e)
+        {
+
+            //  select all processes that were searched
+
+            if (e.KeyCode == Keys.Enter)
+            {
+                int counter = 0;
+
+                foreach (ListViewItem item in processes_listview.Items)
+                {
+                    if (item.SubItems[1].Text.StartsWith(toolstrip_process_lookup_textbox.Text, StringComparison.InvariantCultureIgnoreCase) || item.SubItems[1].Text.Equals(toolstrip_process_lookup_textbox.Text, StringComparison.InvariantCultureIgnoreCase))
+                    {
+
+                        counter += 1;
+                        item.Selected = true;
+                        item.Focused  = true;
+
+                    }
+                }
+
+                toolstrip_count_searched_processes_lbl.Text = counter.ToString() + "x";
+            }
+
+
+
+            //  terminate all processes that were selected
+
+            if (e.KeyCode == Keys.Delete)
+            {
+
+                foreach (ListViewItem item in processes_listview.Items)
+                {
+                    if (item.Selected)
+                    {
+                        using (Process process = Process.GetProcessById(Int32.Parse(item.Text)))
+                        {
+                            try
+                            {
+                                process.Kill();
+                            }
+                            catch (Win32Exception)
+                            {
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
